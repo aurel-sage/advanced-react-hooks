@@ -10,6 +10,23 @@ import {
   PokemonErrorBoundary,
 } from '../pokemon'
 
+function useSafeDispatch(dispatch) {
+  const mountedRef = React.useRef(false)
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  return React.useCallback((...args) => {
+    if(mountedRef.current) {
+      dispatch(...args)
+    }
+  }, [dispatch])
+}
+
 function asyncReducer(state, action) {
   switch (action.type) {
     case 'pending': {
@@ -27,19 +44,17 @@ function asyncReducer(state, action) {
   }
 }
 
-function useAsync(asyncCallback, initialState, dependencies){
-  const [state, dispatch] = React.useReducer(asyncReducer, {
+function useAsync(initialState){
+  const [state, unsafeDispatch] = React.useReducer(asyncReducer, {
     status: 'idle',
     data: null,
     error: null,
     ...initialState
   })
 
-  React.useEffect(() => {
-    const promise = asyncCallback()
-    if (!promise) {
-      return
-    }
+  const dispatch = useSafeDispatch(unsafeDispatch)
+
+  const run = React.useCallback( promise => {
     dispatch({type: 'pending'})
     promise.then(
       data => {
@@ -49,25 +64,26 @@ function useAsync(asyncCallback, initialState, dependencies){
         dispatch({type: 'rejected', error})
       },
     )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, dependencies)
+  }, [dispatch])
 
-  return state
+  return {...state, run}
 }
 
 function PokemonInfo({pokemonName}) {
-  const state = useAsync(
-    () => {
-      if (!pokemonName) {
-        return
-      }
-      return fetchPokemon(pokemonName)
-    }, 
-    { status: pokemonName ? 'pending' : 'idle' }, 
-    [pokemonName]
-  )
-  
-  const {data: pokemon, status, error} = state
+
+  const {
+    data: pokemon,
+    status,
+    error,
+    run,
+  } = useAsync({status: pokemonName ? 'pending' : 'idle'})
+
+  React.useEffect(() => {
+  if (!pokemonName) {
+    return
+  }
+  return run(fetchPokemon(pokemonName))
+}, [pokemonName, run])
 
   switch (status) {
     case 'idle':
